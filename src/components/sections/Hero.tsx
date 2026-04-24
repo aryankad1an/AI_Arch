@@ -19,7 +19,7 @@ const Hero = () => {
 
           {/* Subtitle */}
           <p className="fade-in-up-delay-2 mt-8 max-w-xl text-[16px] leading-[1.7] text-[#888]">
-            Describe your architectural vision in plain text. Our AI transforms
+            Describe your architectural vision in plain text. The AI engine transforms
             your words into interactive 3D models — instantly. Built for
             architects, designers, and dreamers.
           </p>
