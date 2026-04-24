@@ -14,7 +14,7 @@ app.use(
 );
 app.use(express.static('public'));
 
-const geminiApiKey ='AIzaSyCBa97RninwHnX8sTPwxSL7a98BNVPTgFg';
+const geminiApiKey = process.env.GEMINI_API_KEY;
 const googleAI = new GoogleGenerativeAI(geminiApiKey);
 const geminiModel = googleAI.getGenerativeModel({ model: 'gemini-pro' });
 
