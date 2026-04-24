@@ -49,8 +49,8 @@ export const config: TConfig = {
     p: ['Where Ideas Construct Themselves'],
   },
   contact: {
-    p: 'Ready to build with AI?',
-    h2: 'Get in Touch.',
+    p: 'Profile & connect with us',
+    h2: 'Profile.',
     form: {
       name: {
         span: 'Your Name',
