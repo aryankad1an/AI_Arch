@@ -10,52 +10,136 @@ const port = 4000;
 app.use(
   cors({
     origin: '*',
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-gemini-key'],
   })
 );
+const mongoose = require('mongoose');
+
 app.use(express.static('public'));
+app.use(express.json());
 
-const geminiApiKey = process.env.GEMINI_API_KEY;
-const googleAI = new GoogleGenerativeAI(geminiApiKey);
-const geminiModel = googleAI.getGenerativeModel({ model: 'gemini-pro' });
-
-app.get('/', (req, res) => {
-  res.send('Hello World!');
+// MongoDB connection
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/aiarch').then(() => {
+  console.log("Connected to MongoDB");
+}).catch(err => {
+  console.warn("MongoDB connection failed:", err.message);
 });
 
-const test = async () => {
-  const prompt = 'A room with Bed, Chair, Table, TV';
-  const result = await geminiModel.generateContent(prompt);
-  console.log(result.response.text());
+const ProjectSchema = new mongoose.Schema({
+  name: { type: String, default: 'Untitled Project' },
+  promptHistory: [String],
+  coordinates: Object,
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now }
+});
+const Project = mongoose.model('Project', ProjectSchema);
 
-}
-// test();
+app.get('/', (req, res) => {
+  res.send('AI Arch API is running...');
+});
 
-app.get('/generate', async (req, res) => { 
-  let prompt = 'I will now give you a prompt about description of a room with any number of Bed, Chair, Table, TV, you have to give me coordinates of the same assuming the room to be 5m x 5m. Now you have to give me the coordinates in the form ;Object1:(x1,y1);Object2:(x2,y2);Object3:(x3,y3);Object4:(x4,y4);. For example, if you want to place a Bed at (1,1), chair at (2,2), table at (3,3), TV at (4,4), you will give me the coordinates as ;TV:(1,1);Chair:(2,2);Table:(3,3);TV:(4,4); also keep in mind that the coordinates cant exceed 5 and cant be lesser than 1 as the room is 5mx5m otherwise the system will malfunction, also coordinates should be only integer nothing except it, moreover it is possible that you may not want to place all the objects in the room according to the prompt, in that case you can skip the object. Now let me give you the prompt, make sure to understand each and every word really clearly and then give me the coordinates according to the prompt someone needs. If you are outputing multiple object coordinates say tables, then you have to mark them like Table1, Table2, Table3, Table4.. same goes for other objects Also understand the basic positioning in a roomj that is TV should always be ahead of the bed, by ahead it is meant that either the x should be same or the y should be same of TV and the bed(unless specified otherwise) and chair should be always besides the table(unless specified otherwise), multiple beds can be placed side by side as thats how multiple bed rooms go Here is the prompt:';
-  prompt += req.query.prompt;
-  const result = await geminiModel.generateContent(prompt);
-  const tosend = result.response.text();
+app.post('/projects', async (req, res) => {
+  try {
+    const { name } = req.body;
+    const project = new Project({ name: name || 'New Project', coordinates: {}, promptHistory: [] });
+    await project.save();
+    res.json(project);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
-  // create new coordinates object that map object to coordinate
-  let coordinates = {};
-  const objects = ['Chair', 'Table', 'TV', 'Bed', 'Chair1', 'Table1', 'TV1', 'Bed1', 'Chair2', 'Table2', 'TV2', 'Bed2', 'Chair3', 'Table3', 'TV3', 'Bed3', 'Chair4', 'Table4', 'TV4', 'Bed4', 'Chair5', 'Table5', 'TV5', 'Bed5'];
+app.get('/projects/:id', async (req, res) => {
+  try {
+    const project = await Project.findById(req.params.id);
+    res.json(project);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
-  tosend.split(';').forEach(line => { 
-    const parts = line.split(':');
-    const object = parts[0].trim();
-    if (objects.includes(object)) {
-      const coords = parts[1].trim().replace('(', '').replace(')', '').split(',');
-      const x = parseInt(coords[0]);
-      const y = parseInt(coords[1]);
-      
-      coordinates[object] = [x, y];
-      
+app.post('/generate', async (req, res) => { 
+  const geminiApiKeyHeader = req.headers['x-gemini-key'];
+  if (!geminiApiKeyHeader) {
+    return res.status(401).send('Gemini API Key missing from headers. Please set it in Profile Preferences.');
+  }
+
+  const { prompt, projectId, history } = req.body;
+  if (!prompt) return res.status(400).send('Prompt is required');
+
+  const googleAI = new GoogleGenerativeAI(geminiApiKeyHeader);
+  const geminiModel = googleAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+
+  const systemInstructions = `You are an AI architect converting natural language into a JSON layout for a 10m x 10m room.
+Available items: Bed, Chair, Table, TV, Sofa, Plant, Shelf, Window, Door, Desk, Lamp, Rug, Console.
+Output format MUST be a valid JSON object mapping item name/ID to an [x, y] array, where x and y are integers between 1 and 10.
+For example: {"Bed_1": [2, 3], "TV_1": [2, 7], "Chair_1": [5, 5], "Plant_1": [1, 9]}.
+Do not output markdown code blocks. Output ONLY the raw JSON object.
+Consider realistic placements (e.g., chairs near tables, TV across from beds/sofas).
+If there is a history, modify the existing layout according to the new prompt.`;
+
+  let fullPrompt = `${systemInstructions}\n\n`;
+  if (history && history.length > 0) {
+    fullPrompt += `History of prompts:\n${history.map((h, i) => `${i + 1}. ${h}`).join('\n')}\n\n`;
+  }
+  fullPrompt += `Current Request: ${prompt}\n\nPlease provide ONLY the raw JSON mapping.`;
+
+  try {
+    const result = await geminiModel.generateContent(fullPrompt);
+    let tosend = result.response.text().trim();
+    // Strip markdown code blocks if gemini included them
+    if (tosend.startsWith('\`\`\`')) {
+      tosend = tosend.replace(/^\`\`\`(json)?/, '').replace(/\`\`\`$/, '').trim();
     }
-  });
+    
+    let coordinates = {};
+    try {
+      coordinates = JSON.parse(tosend);
+    } catch (parseError) {
+      console.error("JSON Parsing failed:", tosend);
+      return res.status(500).json({ error: "AI produced invalid JSON output", raw: tosend });
+    }
 
-  console.log(coordinates);
-  console.log(tosend);
-  res.send(coordinates);
+    // If it's a known project, update it
+    if (projectId) {
+      const project = await Project.findById(projectId);
+      if (project) {
+        project.coordinates = coordinates;
+        project.promptHistory.push(prompt);
+        project.updatedAt = Date.now();
+        await project.save();
+      }
+    }
+
+    res.json({ coordinates, projectId });
+  } catch (err) {
+    console.error("AI Generation Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/verify-key', async (req, res) => {
+  const key = req.headers['x-gemini-key'];
+  if(!key) return res.status(401).json({ valid: false, error: "No key provided" });
+  try {
+     const googleAI = new GoogleGenerativeAI(key);
+     // Use gemini-2.5-flash for faster/more reliable verification instead of gemini-pro (which could be deprecated depending on API version)
+     const model = googleAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+     await model.generateContent("test");
+     return res.json({ valid: true });
+  } catch(e) {
+     console.error("Key Verification Error:", e);
+     return res.status(401).json({ valid: false, error: e.message });
+  }
+});
+
+app.get('/projects', async (req, res) => {
+  try {
+    const projects = await Project.find().sort({ createdAt: -1 });
+    res.json(projects);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.listen(port, () => {

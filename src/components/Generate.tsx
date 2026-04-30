@@ -2,11 +2,14 @@ import { useState, useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import axios from 'axios';
 import { OrbitControls } from 'three-stdlib';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { useSettingsStore } from '../store/settings';
 
 const Generate = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [content, setContent] = useState<Record<string, number[]>>({});
+  const { geminiApiKey } = useSettingsStore();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const scene = new THREE.Scene();
@@ -142,14 +145,25 @@ const Generate = () => {
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSubmit = () => {
+    if (!geminiApiKey) {
+      alert("Please configure your Gemini API Key in the Profile > Preferences tab first.");
+      navigate('/profile');
+      return;
+    }
+    
     setIsLoading(true);
     axios
-      .get(`http://localhost:4000/generate?prompt=${tempPrompt}`)
+      .get(`http://localhost:4000/generate?prompt=${tempPrompt}`, {
+        headers: { 'x-gemini-key': geminiApiKey }
+      })
       .then((response) => {
-        setContent(response.data);
+        setContent(response.data.coordinates);
       })
       .catch((error) => {
         console.error('There was an error!', error);
+        if (error.response?.status === 401) {
+          alert('Invalid API Key. Please update it in your Profile Preferences.');
+        }
       })
       .finally(() => {
         setIsLoading(false);

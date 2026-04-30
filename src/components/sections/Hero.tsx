@@ -26,7 +26,7 @@ const Hero = () => {
 
           {/* CTA buttons */}
           <div className="fade-in-up-delay-3 mt-12 flex flex-col gap-4 sm:flex-row sm:items-center">
-            <Link to="/generate" className="btn-primary">
+            <Link to="/projects" className="btn-primary">
               Start Generating
               <svg
                 className="ml-2 h-4 w-4"

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSettingsStore } from '../../store/settings';
 
 interface UserProfile {
   displayName: string;
@@ -29,6 +30,10 @@ const defaultPreferences: UserPreferences = {
 };
 
 const Profile = () => {
+  const { geminiApiKey, setGeminiApiKey } = useSettingsStore();
+  const [apiKeyInput, setApiKeyInput] = useState(geminiApiKey || '');
+  const [keyStatus, setKeyStatus] = useState<'idle' | 'verifying' | 'valid' | 'invalid'>('idle');
+
   const [profile, setProfile] = useState<UserProfile>(defaultProfile);
   const [preferences, setPreferences] = useState<UserPreferences>(defaultPreferences);
   const [saved, setSaved] = useState(false);
@@ -45,8 +50,31 @@ const Profile = () => {
   const handleSave = () => {
     localStorage.setItem('aiarch_profile', JSON.stringify(profile));
     localStorage.setItem('aiarch_preferences', JSON.stringify(preferences));
+    setGeminiApiKey(apiKeyInput);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  };
+
+  const verifyApiKey = async () => {
+    if (!apiKeyInput) return;
+    setKeyStatus('verifying');
+    try {
+      const res = await fetch('http://localhost:4000/verify-key', {
+        headers: { 'x-gemini-key': apiKeyInput }
+      });
+      const data = await res.json();
+      setKeyStatus(data.valid ? 'valid' : 'invalid');
+      if (data.valid) {
+        setGeminiApiKey(apiKeyInput);
+      } else {
+        console.error("Verification failed:", data.error);
+        alert(`Verification failed: ${data.error || 'Unknown error'}`);
+      }
+    } catch (e) {
+      setKeyStatus('invalid');
+      console.error(e);
+      alert("Network or verification error. Check console.");
+    }
   };
 
   const handleProfileChange = (field: keyof UserProfile, value: string) => {
@@ -153,6 +181,37 @@ const Profile = () => {
         {/* Preferences tab */}
         {activeTab === 'preferences' && (
           <div className="mt-8 space-y-6">
+
+            {/* API Key */}
+            <div className="rounded-xl border border-[#1a1a1a] bg-[#0a0a0a] p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <p className="text-[15px] font-medium text-white">Gemini API Key</p>
+                  <p className="mt-1 text-[13px] text-[#555]">
+                    Enter your Google Gemini API key to enable 3D generation.
+                  </p>
+                </div>
+                <button
+                  onClick={verifyApiKey}
+                  disabled={keyStatus === 'verifying' || !apiKeyInput}
+                  className="rounded-full bg-white/5 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-white/10 disabled:opacity-50"
+                >
+                  {keyStatus === 'verifying' ? 'Verifying...' : keyStatus === 'valid' ? 'Verified ✓' : 'Verify'}
+                </button>
+              </div>
+              <input
+                type="password"
+                value={apiKeyInput}
+                onChange={(e) => {
+                  setApiKeyInput(e.target.value);
+                  setKeyStatus('idle');
+                }}
+                placeholder="AIzaSy..."
+                className="w-full rounded-lg border border-[#1a1a1a] bg-[#111] px-4 py-2 text-[14px] text-white outline-none"
+              />
+              {keyStatus === 'invalid' && <p className="text-red-500 text-xs mt-2">Invalid API Key or connection failed.</p>}
+            </div>
+
             {/* Grid Size */}
             <div className="flex items-center justify-between rounded-xl border border-[#1a1a1a] bg-[#0a0a0a] p-5">
               <div>
